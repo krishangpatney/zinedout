@@ -374,6 +374,7 @@
     <span class="readout" id="pageIndicator">Page 1 / 1</span>
     <button class="btn btn--icon" id="pageNext" aria-label="Next page">›</button>
     <button class="btn" id="pageAdd">+ Add page</button>
+    <button class="btn" id="pageAddCover">+ Add cover</button>
     <button class="btn" id="pageDelete">Delete page</button>
   </div>
 
@@ -412,7 +413,12 @@
       </label>
     </div>
 
-    <div class="grid-row">
+    <div class="grid-row" id="coverRow" style="display:none;">
+      <span class="side-card__tag">TITLE</span>
+      <input type="text" id="coverTitleInput" class="project-name-input" placeholder="Name your zine" style="max-width:360px;">
+    </div>
+
+    <div class="grid-row" id="gridRow">
       <span class="side-card__tag">COLUMNS</span>
       <button class="btn btn--icon" id="colsMinus" aria-label="Fewer columns">–</button>
       <span class="readout" id="colsReadout">2</span>
@@ -435,7 +441,7 @@
     <button class="link-btn" id="downloadAllBtn" disabled>Download all pages</button>
     <span class="project-status" id="exportStatus"></span>
   </div>
-  <p class="footnote">Photos are processed entirely in your browser — nothing is uploaded anywhere, and your book autosaves on this device as you work. Columns × Rows of 1×1 gives a full page; push either past 1 to split into squares. Each page prints at true 6 × 4in / 152.4 × 101.6mm — open <strong>Print…</strong> and pick your Canon SELPHY (or any AirPrint/USB printer) from the system dialog, scaling off, margins at 0. The primary button hands off to your device's share sheet where supported, which includes Save to Photos.</p>
+  <p class="footnote">Photos are processed entirely in your browser — nothing is uploaded anywhere, and your book autosaves on this device as you work. Columns × Rows of 1×1 gives a full page; push either past 1 to split into squares. <strong>+ Add cover</strong> inserts a dedicated front/back cover page with your zine's title on it — the back panel starts pre-flipped 180° since folding mirrors whatever ends up on the outside; nudge it further with its own rotate button if your fold goes the other way. Each page prints at true 6 × 4in / 152.4 × 101.6mm — open <strong>Print…</strong> and pick your Canon SELPHY (or any AirPrint/USB printer) from the system dialog, scaling off, margins at 0. The primary button hands off to your device's share sheet where supported, which includes Save to Photos.</p>
 
   <input type="file" id="fileInput" accept="image/*" hidden>
 </div>
@@ -470,7 +476,12 @@
     };
   }
   function makePage(){
-    return { rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, panels:[makePanel(1), makePanel(2)] };
+    return { type:'grid', rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, panels:[makePanel(1), makePanel(2)] };
+  }
+  function makeCoverPage(){
+    var front = makePanel(1); front.label = 'Front Cover';
+    var back = makePanel(2); back.label = 'Back Cover'; back.rotation = 180;
+    return { type:'cover', rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, title:'', panels:[front, back] };
   }
   function relabelPanels(panels){
     panels.forEach(function(p,i){ p.label = 'Panel '+(i+1); });
@@ -626,6 +637,54 @@
     targetCtx.restore();
   }
 
+  function wrapTextLines(targetCtx, text, maxWidth, maxLines){
+    var words = text.split(/\s+/).filter(Boolean);
+    var lines = [], line = '';
+    for(var i=0;i<words.length;i++){
+      var test = line ? line + ' ' + words[i] : words[i];
+      if(targetCtx.measureText(test).width > maxWidth && line){
+        lines.push(line);
+        line = words[i];
+        if(lines.length >= maxLines-1){ line = words.slice(i).join(' '); break; }
+      } else {
+        line = test;
+      }
+    }
+    if(line) lines.push(line);
+    return lines.slice(0, maxLines);
+  }
+
+  function drawCoverTitle(targetCtx, page, layout, pxPerMm){
+    if(page.type !== 'cover' || !page.title) return;
+    var rect = layout.slots[0];
+    if(!rect || rect.w<=0 || rect.h<=0) return;
+    targetCtx.save();
+    targetCtx.beginPath();
+    targetCtx.rect(rect.x, rect.y, rect.w, rect.h);
+    targetCtx.clip();
+
+    var scrimH = rect.h*0.36;
+    var grad = targetCtx.createLinearGradient(0, rect.y+rect.h-scrimH, 0, rect.y+rect.h);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.58)');
+    targetCtx.fillStyle = grad;
+    targetCtx.fillRect(rect.x, rect.y+rect.h-scrimH, rect.w, scrimH);
+
+    var fontSize = clamp(rect.w*0.115, pxPerMm*3, pxPerMm*13);
+    targetCtx.fillStyle = '#FFFFFF';
+    targetCtx.font = '700 ' + fontSize + 'px -apple-system, BlinkMacSystemFont, sans-serif';
+    targetCtx.textAlign = 'center';
+    targetCtx.textBaseline = 'alphabetic';
+    var lineHeight = fontSize*1.18;
+    var lines = wrapTextLines(targetCtx, page.title, rect.w*0.84, 3);
+    var baseline = rect.y + rect.h - fontSize*0.85;
+    for(var i=0;i<lines.length;i++){
+      var y = baseline - (lines.length-1-i)*lineHeight;
+      targetCtx.fillText(lines[i], rect.x+rect.w/2, y);
+    }
+    targetCtx.restore();
+  }
+
   function drawScene(targetCtx, page, pxPerMm, padPx, opts){
     var layout = computeLayout(page, pxPerMm, padPx);
     targetCtx.clearRect(0, 0, targetCtx.canvas.width, targetCtx.canvas.height);
@@ -636,6 +695,8 @@
     page.panels.forEach(function(panel, i){
       drawSlot(targetCtx, panel, layout.slots[i], opts.interactiveEmpty);
     });
+
+    drawCoverTitle(targetCtx, page, layout, pxPerMm);
 
     if(opts.foldGuide){
       targetCtx.save();
@@ -709,7 +770,7 @@
     var panelW = (SHEET_W_MM - 2*page.marginMm - (page.cols-1)*page.gutterMm)/page.cols;
     var panelH = (SHEET_H_MM - 2*page.marginMm - (page.rows-1)*page.gutterMm)/page.rows;
     document.getElementById('panelReadout').textContent = panelW.toFixed(1) + ' × ' + panelH.toFixed(1) + ' mm';
-    document.getElementById('panelBadge').textContent = page.panels.length + ' UP';
+    document.getElementById('panelBadge').textContent = page.type === 'cover' ? 'COVER' : (page.panels.length + ' UP');
   }
 
   function updateActionButtons(){
@@ -769,12 +830,11 @@
       if(!panel){ URL.revokeObjectURL(url); return; }
       panel.img = img;
       panel.blob = file;
-      panel.rotation = 0;
       panel.zoom = 1;
       panel.panX = 0.5;
       panel.panY = 0.5;
       panel.fit = 'cover';
-      panel.bitmap = makeRotatedBitmap(img, 0);
+      panel.bitmap = makeRotatedBitmap(img, panel.rotation);
       panel.filename = file.name;
       if(targetPage === currentPage()){
         syncPanelCard(index);
@@ -900,7 +960,9 @@
   // ---------------- page navigation ----------------
 
   function updatePageIndicator(){
-    document.getElementById('pageIndicator').textContent = 'Page ' + (zine.pageIndex+1) + ' / ' + zine.pages.length;
+    var page = currentPage();
+    var suffix = page.type === 'cover' ? ' · Cover' : '';
+    document.getElementById('pageIndicator').textContent = 'Page ' + (zine.pageIndex+1) + ' / ' + zine.pages.length + suffix;
     document.getElementById('pagePrev').disabled = zine.pageIndex<=0;
     document.getElementById('pageNext').disabled = zine.pageIndex>=zine.pages.length-1;
     document.getElementById('pageDelete').disabled = zine.pages.length<=1;
@@ -908,9 +970,13 @@
 
   function onPageChanged(){
     var page = currentPage();
+    var isCover = page.type === 'cover';
     document.getElementById('marginRange').value = page.marginMm;
     document.getElementById('gutterRange').value = page.gutterMm;
     foldLineCheck.checked = !!page.foldMarks;
+    document.getElementById('gridRow').style.display = isCover ? 'none' : '';
+    document.getElementById('coverRow').style.display = isCover ? '' : 'none';
+    if(isCover) document.getElementById('coverTitleInput').value = page.title || '';
     updateGridReadouts();
     updatePageIndicator();
     rebuildSideCards();
@@ -928,6 +994,19 @@
     zine.pages.push(makePage());
     zine.pageIndex = zine.pages.length-1;
     onPageChanged();
+    scheduleAutosave();
+  });
+  document.getElementById('pageAddCover').addEventListener('click', function(){
+    zine.pages.unshift(makeCoverPage());
+    zine.pageIndex = 0;
+    onPageChanged();
+    scheduleAutosave();
+  });
+  document.getElementById('coverTitleInput').addEventListener('input', function(e){
+    var page = currentPage();
+    if(page.type !== 'cover') return;
+    page.title = e.target.value;
+    scheduleRedraw();
     scheduleAutosave();
   });
   document.getElementById('pageDelete').addEventListener('click', function(){
@@ -1226,6 +1305,7 @@
       pageIndex: zine.pageIndex,
       pages: zine.pages.map(function(page){
         return {
+          type: page.type || 'grid', title: page.title || '',
           rows: page.rows, cols: page.cols, marginMm: page.marginMm, gutterMm: page.gutterMm, foldMarks: page.foldMarks,
           panels: page.panels.map(function(p){
             return { rotation:p.rotation, zoom:p.zoom, panX:p.panX, panY:p.panY, fit:p.fit, filename:p.filename, blob:p.blob || null };
@@ -1257,13 +1337,13 @@
       var panelLoaders = (pdata.panels || []).map(function(pd, i){
         return new Promise(function(res){
           var panel = makePanel(i+1);
+          panel.rotation = pd.rotation || 0;
           if(!pd.blob){ res(panel); return; }
           var url = URL.createObjectURL(pd.blob);
           var img = new Image();
           img.onload = function(){
             panel.img = img;
             panel.blob = pd.blob;
-            panel.rotation = pd.rotation || 0;
             panel.zoom = pd.zoom || 1;
             panel.panX = typeof pd.panX === 'number' ? pd.panX : 0.5;
             panel.panY = typeof pd.panY === 'number' ? pd.panY : 0.5;
@@ -1278,7 +1358,14 @@
         });
       });
       return Promise.all(panelLoaders).then(function(panels){
+        var type = pdata.type || 'grid';
+        if(type === 'cover' && panels.length >= 2){
+          panels[0].label = 'Front Cover';
+          panels[1].label = 'Back Cover';
+        }
         return {
+          type: type,
+          title: pdata.title || '',
           rows: pdata.rows || 1,
           cols: pdata.cols || Math.max(panels.length,1),
           marginMm: typeof pdata.marginMm === 'number' ? pdata.marginMm : 6,
