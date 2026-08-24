@@ -396,6 +396,10 @@
         <span class="readout" id="gutterReadout">3.0 mm</span>
       </div>
       <div class="spec">
+        <label for="orientationToggle">Sheet orientation</label>
+        <button class="btn" id="orientationToggle" aria-label="Toggle sheet orientation" title="Rotate the whole sheet 90°">Landscape (6×4)</button>
+      </div>
+      <div class="spec">
         <label for="dpiSelect">Export resolution</label>
         <select id="dpiSelect">
           <option value="150">150 dpi</option>
@@ -450,7 +454,12 @@
 (function(){
   "use strict";
 
-  var SHEET_W_MM = 152.4, SHEET_H_MM = 101.6;
+  var BASE_LONG_MM = 152.4, BASE_SHORT_MM = 101.6;
+  function sheetDims(page){
+    return page.orientation === 'portrait'
+      ? { w:BASE_SHORT_MM, h:BASE_LONG_MM }
+      : { w:BASE_LONG_MM, h:BASE_SHORT_MM };
+  }
   var PREVIEW_SCALE = 6.2;   // px per mm on screen
   var PREVIEW_PAD = 34;      // px, room for crop marks + spec label
   var MAX_COLS = 4, MAX_ROWS = 4;
@@ -476,12 +485,12 @@
     };
   }
   function makePage(){
-    return { type:'grid', rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, panels:[makePanel(1), makePanel(2)] };
+    return { type:'grid', orientation:'landscape', rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, panels:[makePanel(1), makePanel(2)] };
   }
   function makeCoverPage(){
     var front = makePanel(1); front.label = 'Front Cover';
     var back = makePanel(2); back.label = 'Back Cover'; back.rotation = 180;
-    return { type:'cover', rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, title:'', panels:[front, back] };
+    return { type:'cover', orientation:'landscape', rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, title:'', panels:[front, back] };
   }
   function relabelPanels(panels){
     panels.forEach(function(p,i){ p.label = 'Panel '+(i+1); });
@@ -522,8 +531,9 @@
   // ---------------- layout & drawing ----------------
 
   function computeLayout(page, pxPerMm, padPx){
+    var dims = sheetDims(page);
     var sheetX = padPx, sheetY = padPx;
-    var sheetWpx = SHEET_W_MM*pxPerMm, sheetHpx = SHEET_H_MM*pxPerMm;
+    var sheetWpx = dims.w*pxPerMm, sheetHpx = dims.h*pxPerMm;
     var marginPx = page.marginMm*pxPerMm;
     var gutterPx = page.gutterMm*pxPerMm;
     var cols = page.cols, rows = page.rows;
@@ -633,7 +643,9 @@
     targetCtx.font = '500 11px ui-monospace, "SF Mono", Menlo, monospace';
     targetCtx.textAlign = 'left';
     targetCtx.textBaseline = 'alphabetic';
-    targetCtx.fillText(SHEET_W_MM.toFixed(1) + ' × ' + SHEET_H_MM.toFixed(1) + ' MM  ·  6 × 4 IN', layout.sheetX, layout.sheetY - 10);
+    var wMm = layout.sheetWpx/pxPerMm, hMm = layout.sheetHpx/pxPerMm;
+    var wIn = Math.round(wMm/25.4), hIn = Math.round(hMm/25.4);
+    targetCtx.fillText(wMm.toFixed(1) + ' × ' + hMm.toFixed(1) + ' MM  ·  ' + wIn + ' × ' + hIn + ' IN', layout.sheetX, layout.sheetY - 10);
     targetCtx.restore();
   }
 
@@ -747,12 +759,14 @@
     return layout;
   }
 
-  function sizePreviewCanvas(){
-    canvas.width = Math.round(SHEET_W_MM*PREVIEW_SCALE + PREVIEW_PAD*2);
-    canvas.height = Math.round(SHEET_H_MM*PREVIEW_SCALE + PREVIEW_PAD*2);
+  function sizePreviewCanvas(page){
+    var dims = sheetDims(page);
+    canvas.width = Math.round(dims.w*PREVIEW_SCALE + PREVIEW_PAD*2);
+    canvas.height = Math.round(dims.h*PREVIEW_SCALE + PREVIEW_PAD*2);
   }
 
   function redraw(){
+    sizePreviewCanvas(currentPage());
     currentLayout = drawScene(ctx, currentPage(), PREVIEW_SCALE, PREVIEW_PAD, { marks:true, foldGuide:true, foldMarks:false, interactiveEmpty:true });
     updateReadouts();
   }
@@ -767,10 +781,12 @@
     var page = currentPage();
     document.getElementById('marginReadout').textContent = page.marginMm.toFixed(1) + ' mm';
     document.getElementById('gutterReadout').textContent = page.gutterMm.toFixed(1) + ' mm';
-    var panelW = (SHEET_W_MM - 2*page.marginMm - (page.cols-1)*page.gutterMm)/page.cols;
-    var panelH = (SHEET_H_MM - 2*page.marginMm - (page.rows-1)*page.gutterMm)/page.rows;
+    var dims = sheetDims(page);
+    var panelW = (dims.w - 2*page.marginMm - (page.cols-1)*page.gutterMm)/page.cols;
+    var panelH = (dims.h - 2*page.marginMm - (page.rows-1)*page.gutterMm)/page.rows;
     document.getElementById('panelReadout').textContent = panelW.toFixed(1) + ' × ' + panelH.toFixed(1) + ' mm';
     document.getElementById('panelBadge').textContent = page.type === 'cover' ? 'COVER' : (page.panels.length + ' UP');
+    document.getElementById('orientationToggle').textContent = page.orientation === 'portrait' ? 'Portrait (4×6)' : 'Landscape (6×4)';
   }
 
   function updateActionButtons(){
@@ -1155,14 +1171,21 @@
     currentPage().foldMarks = foldLineCheck.checked;
     scheduleAutosave();
   });
+  document.getElementById('orientationToggle').addEventListener('click', function(){
+    var page = currentPage();
+    page.orientation = page.orientation === 'portrait' ? 'landscape' : 'portrait';
+    redraw();
+    scheduleAutosave();
+  });
 
   // ---------------- export ----------------
 
   function buildExportCanvasForPage(page){
     var pxPerMm = zine.dpi/25.4;
+    var dims = sheetDims(page);
     var c = document.createElement('canvas');
-    c.width = Math.round(SHEET_W_MM*pxPerMm);
-    c.height = Math.round(SHEET_H_MM*pxPerMm);
+    c.width = Math.round(dims.w*pxPerMm);
+    c.height = Math.round(dims.h*pxPerMm);
     var ectx = c.getContext('2d');
     drawScene(ectx, page, pxPerMm, 0, { marks:false, foldGuide:false, foldMarks: page.foldMarks, interactiveEmpty:false });
     return c;
@@ -1202,15 +1225,16 @@
   printBtn.addEventListener('click', function(){
     var page = currentPage();
     if(!pageReady(page)) return;
+    var dims = sheetDims(page);
     var c = buildExportCanvasForPage(page);
     var dataUrl = c.toDataURL('image/png');
     var w = window.open('', '_blank');
     if(!w){ alert('Your browser blocked the print tab. Allow pop-ups for this page and try again.'); return; }
     w.document.write(
       '<!doctype html><html><head><title>Print — Zinedout 4×6</title><style>' +
-      '@page{ size: ' + SHEET_W_MM + 'mm ' + SHEET_H_MM + 'mm; margin:0; }' +
+      '@page{ size: ' + dims.w + 'mm ' + dims.h + 'mm; margin:0; }' +
       'html,body{ margin:0; padding:0; background:#fff; }' +
-      'img{ width:' + SHEET_W_MM + 'mm; height:' + SHEET_H_MM + 'mm; display:block; }' +
+      'img{ width:' + dims.w + 'mm; height:' + dims.h + 'mm; display:block; }' +
       '</style></head><body><img src="' + dataUrl + '"></body></html>'
     );
     w.document.close();
@@ -1305,7 +1329,7 @@
       pageIndex: zine.pageIndex,
       pages: zine.pages.map(function(page){
         return {
-          type: page.type || 'grid', title: page.title || '',
+          type: page.type || 'grid', orientation: page.orientation || 'landscape', title: page.title || '',
           rows: page.rows, cols: page.cols, marginMm: page.marginMm, gutterMm: page.gutterMm, foldMarks: page.foldMarks,
           panels: page.panels.map(function(p){
             return { rotation:p.rotation, zoom:p.zoom, panX:p.panX, panY:p.panY, fit:p.fit, filename:p.filename, blob:p.blob || null };
@@ -1365,6 +1389,7 @@
         }
         return {
           type: type,
+          orientation: pdata.orientation === 'portrait' ? 'portrait' : 'landscape',
           title: pdata.title || '',
           rows: pdata.rows || 1,
           cols: pdata.cols || Math.max(panels.length,1),
@@ -1475,7 +1500,7 @@
     updateProjectUI();
   }
 
-  sizePreviewCanvas();
+  sizePreviewCanvas(currentPage());
   refreshDownloadLabel();
 
   if(window.indexedDB){
