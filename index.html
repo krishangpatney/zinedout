@@ -401,6 +401,10 @@
         <button class="btn" id="orientationToggle" aria-label="Toggle sheet orientation" title="Rotate the whole sheet 90°">Landscape (6×4)</button>
       </div>
       <div class="spec">
+        <label for="backgroundToggle">Sheet background</label>
+        <button class="btn" id="backgroundToggle" aria-label="Toggle sheet background color" title="Switch between white and black margins">White</button>
+      </div>
+      <div class="spec">
         <label for="dpiSelect">Export resolution</label>
         <select id="dpiSelect">
           <option value="150">150 dpi</option>
@@ -486,12 +490,12 @@
     };
   }
   function makePage(){
-    return { type:'grid', orientation:'landscape', rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, panels:[makePanel(1), makePanel(2)] };
+    return { type:'grid', orientation:'landscape', background:'white', rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, panels:[makePanel(1), makePanel(2)] };
   }
   function makeCoverPage(){
     var front = makePanel(1); front.label = 'Front Cover';
     var back = makePanel(2); back.label = 'Back Cover'; back.rotation = 180;
-    return { type:'cover', orientation:'landscape', rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, title:'', panels:[front, back] };
+    return { type:'cover', orientation:'landscape', background:'white', rows:1, cols:2, marginMm:6, gutterMm:3, foldMarks:false, title:'', panels:[front, back] };
   }
   function relabelPanels(panels){
     panels.forEach(function(p,i){ p.label = 'Panel '+(i+1); });
@@ -574,7 +578,7 @@
     return oc;
   }
 
-  function drawSlot(targetCtx, panel, rect, showEmptyUI){
+  function drawSlot(targetCtx, panel, rect, showEmptyUI, bgColor){
     targetCtx.save();
     targetCtx.beginPath();
     targetCtx.rect(rect.x, rect.y, rect.w, rect.h);
@@ -594,7 +598,7 @@
       var drawY = baseY + slackY*(0.5-panel.panY);
 
       if(panel.fit !== 'cover'){
-        targetCtx.fillStyle = cssVar('--surface');
+        targetCtx.fillStyle = bgColor;
         targetCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
       }
       targetCtx.drawImage(wb, drawX, drawY, dispW, dispH);
@@ -612,7 +616,7 @@
       targetCtx.textBaseline = 'middle';
       targetCtx.fillText(panel.label, rect.x+rect.w/2, rect.y+rect.h/2);
     } else {
-      targetCtx.fillStyle = '#FFFFFF';
+      targetCtx.fillStyle = bgColor;
       targetCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
     }
     targetCtx.restore();
@@ -700,13 +704,14 @@
 
   function drawScene(targetCtx, page, pxPerMm, padPx, opts){
     var layout = computeLayout(page, pxPerMm, padPx);
+    var bgColor = page.background === 'black' ? '#000000' : '#FFFFFF';
     targetCtx.clearRect(0, 0, targetCtx.canvas.width, targetCtx.canvas.height);
 
-    targetCtx.fillStyle = '#FFFFFF';
+    targetCtx.fillStyle = bgColor;
     targetCtx.fillRect(layout.sheetX, layout.sheetY, layout.sheetWpx, layout.sheetHpx);
 
     page.panels.forEach(function(panel, i){
-      drawSlot(targetCtx, panel, layout.slots[i], opts.interactiveEmpty);
+      drawSlot(targetCtx, panel, layout.slots[i], opts.interactiveEmpty, bgColor);
     });
 
     drawCoverTitle(targetCtx, page, layout, pxPerMm);
@@ -734,7 +739,7 @@
     if(opts.foldMarks){
       var tick = pxPerMm*4;
       targetCtx.save();
-      targetCtx.strokeStyle = 'rgba(0,0,0,0.4)';
+      targetCtx.strokeStyle = page.background === 'black' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.4)';
       targetCtx.lineWidth = Math.max(1, pxPerMm*0.14);
       layout.foldXs.forEach(function(fx){
         targetCtx.beginPath();
@@ -788,6 +793,7 @@
     document.getElementById('panelReadout').textContent = panelW.toFixed(1) + ' × ' + panelH.toFixed(1) + ' mm';
     document.getElementById('panelBadge').textContent = page.type === 'cover' ? 'COVER' : (page.panels.length + ' UP');
     document.getElementById('orientationToggle').textContent = page.orientation === 'portrait' ? 'Portrait (4×6)' : 'Landscape (6×4)';
+    document.getElementById('backgroundToggle').textContent = page.background === 'black' ? 'Black' : 'White';
   }
 
   function updateActionButtons(){
@@ -1178,6 +1184,12 @@
     redraw();
     scheduleAutosave();
   });
+  document.getElementById('backgroundToggle').addEventListener('click', function(){
+    var page = currentPage();
+    page.background = page.background === 'black' ? 'white' : 'black';
+    redraw();
+    scheduleAutosave();
+  });
 
   // ---------------- export ----------------
 
@@ -1330,7 +1342,7 @@
       pageIndex: zine.pageIndex,
       pages: zine.pages.map(function(page){
         return {
-          type: page.type || 'grid', orientation: page.orientation || 'landscape', title: page.title || '',
+          type: page.type || 'grid', orientation: page.orientation || 'landscape', background: page.background || 'white', title: page.title || '',
           rows: page.rows, cols: page.cols, marginMm: page.marginMm, gutterMm: page.gutterMm, foldMarks: page.foldMarks,
           panels: page.panels.map(function(p){
             return { rotation:p.rotation, zoom:p.zoom, panX:p.panX, panY:p.panY, fit:p.fit, filename:p.filename, blob:p.blob || null };
@@ -1391,6 +1403,7 @@
         return {
           type: type,
           orientation: pdata.orientation === 'portrait' ? 'portrait' : 'landscape',
+          background: pdata.background === 'black' ? 'black' : 'white',
           title: pdata.title || '',
           rows: pdata.rows || 1,
           cols: pdata.cols || Math.max(panels.length,1),
